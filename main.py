@@ -309,7 +309,7 @@ def write_project_excel(project):
 
         ws[f'A{current_row}'] = "Wochentag"
         ws[f'A{current_row}'].font = header_font
-        ws[f'A{current_row}'].alignment = alignment_center
+        ws[f'A{current_row}'].alignment = alignment_left
         for idx, d in enumerate(workdays):
             cell = ws.cell(row=current_row, column=2 + idx, value=d['weekday'])
             cell.alignment = alignment_center
@@ -371,9 +371,12 @@ def write_project_excel(project):
 
         # 2. Budgetcheck pro Tag, Marke einsetzen BUDGET! wenn überschritten insgesamt
         over_budget_days = set()
-        for date, day_cost in project_day_costs.items():
-            if total_project_cost + day_cost > project.budget:
+        budget_exhausted = False
+        for date in sorted(project_day_costs.keys()):
+            day_cost = project_day_costs[date]
+            if budget_exhausted or (total_project_cost + day_cost > project.budget):
                 over_budget_days.add(date)
+                budget_exhausted = True
             else:
                 total_project_cost += day_cost
 
@@ -392,7 +395,9 @@ def write_project_excel(project):
                 col = 2 + idx
                 info = emp_day_values[emp_name][date]
 
-                if info['reason'] is not None:
+                if date in over_budget_days:
+                    cell = ws.cell(row=current_row, column=col, value='')
+                elif info['reason'] is not None:
                     cell = ws.cell(row=current_row, column=col, value=info['reason'])
                     cell.fill = red_fill
                     # Fehlzeiten sollen in der Summe/Budget mitgezaehlt werden
@@ -400,11 +405,6 @@ def write_project_excel(project):
                     row_cost += info['cost']
                 elif d.get('is_holiday'):
                     cell = ws.cell(row=current_row, column=col, value="")
-                elif date in over_budget_days:
-                    cell = ws.cell(row=current_row, column=col, value='')
-                    #cell.fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
-                    row_hours += info['hours'] if info['hours'] is not None else 0
-                    row_cost += info['cost']
                 else:
                     cell = ws.cell(row=current_row, column=col, value=float(info['hours']))
                     row_hours += info['hours'] if info['hours'] is not None else 0
