@@ -218,8 +218,8 @@ FEHLTAGE_FILE = "Fehltage DIM 23-24.xlsx"
 hessian_holidays = holidays.DE(prov='HE', years=YEAR)
 
 # ==================== PROJEKTE DEFINIEREN ====================
-project_1 = cProject("Project A", 200000)
-project_2 = cProject("Project B", 300000)
+project_1 = cProject("Project A", 20000)
+project_2 = cProject("Project B", 30000)
 # Weitere Projekte hier hinzufügen...
 # ============================================================
 
@@ -256,15 +256,14 @@ def write_project_excel(project):
     # Stile
     red_font = Font(color="FF0000", bold=True)
     red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-    holiday_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    holiday_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
     header_font = Font(bold=True)
     alignment_center = Alignment(horizontal="center", vertical="center")
     alignment_left = Alignment(horizontal="left", vertical="center")
 
     current_row = 3
     total_project_cost = 0.0
-
-    emp_budget_cumulative = {f"{emp.lastName}, {emp.name}": 0.0 for emp in employees}
+    project_budget_cumulative = 0.0
 
     for month in range(1, 13):
         month_name_str = MONTHS_GER[month]
@@ -301,8 +300,11 @@ def write_project_excel(project):
         ws.cell(row=current_row, column=total_col+1, value="Stundenlohn").font = header_font
         ws.cell(row=current_row, column=total_col+1).alignment = alignment_center
         # Spalte total_col+2 bleibt leer (Abstand)
-        ws.cell(row=current_row, column=total_col+3, value="Budget verwendet").font = header_font
+        ws.cell(row=current_row, column=total_col+3, value="Summe x Stundenlohn").font = header_font
         ws.cell(row=current_row, column=total_col+3).alignment = alignment_center
+        ws.cell(row=current_row, column=total_col+4, value="").alignment = alignment_center
+        ws.cell(row=current_row, column=total_col+5, value="Aufgebrauchtes Budget").font = header_font
+        ws.cell(row=current_row, column=total_col+5).alignment = alignment_center
         current_row += 1
 
         ws[f'A{current_row}'] = "Wochentag"
@@ -318,6 +320,8 @@ def write_project_excel(project):
         ws.cell(row=current_row, column=total_col+1, value="").alignment = alignment_center
         ws.cell(row=current_row, column=total_col+2, value="").alignment = alignment_center
         ws.cell(row=current_row, column=total_col+3, value="").alignment = alignment_center
+        ws.cell(row=current_row, column=total_col+4, value="").alignment = alignment_center
+        ws.cell(row=current_row, column=total_col+5, value="").alignment = alignment_center
         current_row += 1
 
         # Projekttageskosten und Zeilenpositionen vorbereiten
@@ -350,13 +354,20 @@ def write_project_excel(project):
                 is_absence = date in absences.get(emp_name, {})
                 if is_absence:
                     reason = absences[emp_name][date]
+                elif d.get('is_holiday'):
+                    # Feiertag: als Urlaub behandeln
+                    reason = "UT"
+                else:
+                    reason = None
+
+                if reason is not None:
                     # Fehlzeiten gelten budgetwirksam als Stunden, aber optisch markiert
                     emp_day_values[emp_name][date] = {'hours': project_hours, 'reason': reason, 'cost': day_cost}
                 else:
                     emp_day_values[emp_name][date] = {'hours': project_hours, 'reason': None, 'cost': day_cost}
 
-                if (not d.get('is_holiday')) or is_absence:
-                    project_day_costs[date] += day_cost
+                # Auch Feiertage (UT) sollen in Stunden/Kosten eingehen
+                project_day_costs[date] += day_cost
 
         # 2. Budgetcheck pro Tag, Marke einsetzen BUDGET! wenn überschritten insgesamt
         over_budget_days = set()
@@ -380,11 +391,6 @@ def write_project_excel(project):
                 date = d['date']
                 col = 2 + idx
                 info = emp_day_values[emp_name][date]
-                # Feiertag: nur dann Text schreiben, wenn die Fehltage-Liste einen Grund liefert
-                if d.get('is_holiday') and info['reason'] is None:
-                    info_reason = absences.get(emp_name, {}).get(date)
-                    if info_reason is not None:
-                        info = {**info, 'reason': info_reason}
 
                 if info['reason'] is not None:
                     cell = ws.cell(row=current_row, column=col, value=info['reason'])
@@ -395,8 +401,8 @@ def write_project_excel(project):
                 elif d.get('is_holiday'):
                     cell = ws.cell(row=current_row, column=col, value="")
                 elif date in over_budget_days:
-                    cell = ws.cell(row=current_row, column=col, value='BUDGET!')
-                    cell.fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+                    cell = ws.cell(row=current_row, column=col, value='')
+                    #cell.fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
                     row_hours += info['hours'] if info['hours'] is not None else 0
                     row_cost += info['cost']
                 else:
@@ -420,10 +426,17 @@ def write_project_excel(project):
 
             # Spalte 35 bleibt leer (Abstand)
 
-            # Budget verwendet (Spalte 36)
-            emp_budget_cumulative[emp_name] += row_cost
-            cell_budget = ws.cell(row=current_row, column=total_col+3, value=round(emp_budget_cumulative[emp_name], 2))
+            # Summe x Stundenlohn (Spalte 36): Produkt aus Summe Std. und Stundenlohn
+            row_cost = row_hours * emp.salary_hour
+            cell_budget = ws.cell(row=current_row, column=total_col+3, value=round(row_cost, 2))
             cell_budget.alignment = alignment_center
+
+            # Abstandsspalte (Spalte 37) bleibt leer
+
+            # Aufgebrauchtes Budget: kumulierte Gesamtsumme aller "Summe x Stundenlohn"
+            project_budget_cumulative += row_cost
+            cell_project_budget = ws.cell(row=current_row, column=total_col+5, value=round(project_budget_cumulative, 2))
+            cell_project_budget.alignment = alignment_center
 
             current_row += 1
 
@@ -440,7 +453,8 @@ def write_project_excel(project):
     total_col = 2 + 31
     ws.column_dimensions[get_column_letter(total_col)].width = 14      # Summe Std.
     ws.column_dimensions[get_column_letter(total_col+1)].width = 14    # Stundenlohn
-    ws.column_dimensions[get_column_letter(total_col+3)].width = 16    # Budget verwendet
+    ws.column_dimensions[get_column_letter(total_col+3)].width = 20    # Summe x Stundenlohn
+    ws.column_dimensions[get_column_letter(total_col+5)].width = 20    # Aufgebrauchtes Budget
 
     output_file = f"Stundennachweis_{project.name}_{YEAR}.xlsx"
     try:
